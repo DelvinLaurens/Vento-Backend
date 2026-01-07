@@ -6,8 +6,7 @@ import jwt from 'jsonwebtoken';
 
 const app = express();
 const prisma = new PrismaClient();
-const PORT = 5000;
-const SECRET_KEY = "VENTO123";
+const SECRET_KEY = process.env.SECRET_KEY || "VENTO123";
 
 app.use(cors());
 app.use(express.json());
@@ -27,9 +26,7 @@ const authenticateToken = (req: any, res: Response, next: NextFunction) => {
 };
 
 // --- AUTH API ---
-
-// 1. LOGIN
-app.post('/auth/login', async (req, res) => {
+app.post('/auth/login', async (req: Request, res: Response) => {
   const { username, password } = req.body;
   const user = await prisma.user.findUnique({ where: { username } });
 
@@ -41,7 +38,6 @@ app.post('/auth/login', async (req, res) => {
   res.json({ user: { id: user.id, namaToko: user.namaToko, role: user.role }, token });
 });
 
-// 2. REGISTER (Bisa oleh Admin lewat Token atau Owner lewat Secret Key)
 app.post('/auth/register', async (req: Request, res: Response) => {
   const { username, password, namaToko, adminSecret } = req.body;
   const authHeader = req.headers['authorization'];
@@ -50,13 +46,10 @@ app.post('/auth/register', async (req: Request, res: Response) => {
   let isAuthorized = false;
   let roleUser = "USER";
 
-  // Jalur 1: Rahasia Owner (Untuk buat Admin pertama kali)
   if (adminSecret === "VENTO_OWNER_SECRET_2026") {
     isAuthorized = true;
     roleUser = "ADMIN";
-  } 
-  // Jalur 2: Token Admin (Untuk Admin mendaftarkan User baru)
-  else if (token) {
+  } else if (token) {
     try {
       const decoded: any = jwt.verify(token, SECRET_KEY);
       if (decoded.role === 'ADMIN') {
@@ -69,7 +62,7 @@ app.post('/auth/register', async (req: Request, res: Response) => {
   }
 
   if (!isAuthorized) {
-    return res.status(401).json({ message: "Akses ditolak! Token hilang atau Secret Key salah." });
+    return res.status(401).json({ message: "Akses ditolak!" });
   }
 
   try {
@@ -83,8 +76,7 @@ app.post('/auth/register', async (req: Request, res: Response) => {
   }
 });
 
-// --- ADMIN AREA (Hanya bisa diakses ROLE ADMIN) ---
-
+// --- ADMIN AREA ---
 app.get('/admin/users', authenticateToken, async (req: any, res) => {
   if (req.user.role !== 'ADMIN') return res.status(403).json({ message: "Akses Ditolak" });
   const users = await prisma.user.findMany({
@@ -94,22 +86,10 @@ app.get('/admin/users', authenticateToken, async (req: any, res) => {
   res.json(users);
 });
 
-app.put('/admin/users/:id', authenticateToken, async (req: any, res) => {
-  if (req.user.role !== 'ADMIN') return res.status(403).json({ message: "Akses Ditolak" });
-  const { username, namaToko, role } = req.body;
-  try {
-    const updated = await prisma.user.update({
-      where: { id: Number(req.params.id) },
-      data: { username, namaToko, role }
-    });
-    res.json(updated);
-  } catch (e) { res.status(400).json({ message: "Gagal update" }); }
-});
-
 app.delete('/admin/users/:id', authenticateToken, async (req: any, res) => {
   if (req.user.role !== 'ADMIN') return res.status(403).json({ message: "Akses Ditolak" });
-  const userId = Number(req.params.id);
   try {
+    const userId = Number(req.params.id);
     await prisma.$transaction([
       prisma.activityLog.deleteMany({ where: { userId } }),
       prisma.item.deleteMany({ where: { userId } }),
@@ -119,8 +99,7 @@ app.delete('/admin/users/:id', authenticateToken, async (req: any, res) => {
   } catch (e) { res.status(400).json({ message: "Gagal hapus" }); }
 });
 
-// --- API GUDANG (DENGAN LOG AKTIVITAS) ---
-
+// --- INVENTORY API ---
 app.get('/items', authenticateToken, async (req: any, res) => {
   const items = await prisma.item.findMany({ 
     where: { userId: Number(req.user.userId) },
@@ -138,7 +117,7 @@ app.post('/items', authenticateToken, async (req: any, res) => {
         data: { nama, harga: Number(harga), stok: Number(stok), kategori, satuan, barcode, userId }
       });
       await tx.activityLog.create({
-        data: { aksi: "TAMBAH", rincian: `Menambah: ${nama} (${stok} ${satuan})`, userId, itemId: newItem.id }
+        data: { aksi: "TAMBAH", rincian: `Menambah: ${nama}`, userId, itemId: newItem.id }
       });
       return newItem;
     });
@@ -151,14 +130,14 @@ app.put('/items/:id', authenticateToken, async (req: any, res) => {
   const userId = Number(req.user.userId);
   try {
     const result = await prisma.$transaction(async (tx) => {
-      const updated = await tx.item.update({
+      const updatedItem = await tx.item.update({
         where: { id: Number(req.params.id) },
         data: { nama, harga: Number(harga), stok: Number(stok), kategori, satuan }
       });
       await tx.activityLog.create({
-        data: { aksi: "EDIT", rincian: `Update: ${nama}`, userId, itemId: updated.id }
+        data: { aksi: "EDIT", rincian: `Update: ${nama}`, userId, itemId: updatedItem.id }
       });
-      return updated;
+      return updatedItem;
     });
     res.json(result);
   } catch (e) { res.status(400).json({ message: "Gagal update" }); }
@@ -166,14 +145,13 @@ app.put('/items/:id', authenticateToken, async (req: any, res) => {
 
 app.delete('/items/:id', authenticateToken, async (req: any, res) => {
   const userId = Number(req.user.userId);
-  const itemId = Number(req.params.id);
   try {
-    const item = await prisma.item.findUnique({ where: { id: itemId } });
+    const item = await prisma.item.findUnique({ where: { id: Number(req.params.id) } });
     await prisma.$transaction([
       prisma.activityLog.create({
         data: { aksi: "HAPUS", rincian: `Hapus: ${item?.nama}`, userId, itemId: null }
       }),
-      prisma.item.delete({ where: { id: itemId } })
+      prisma.item.delete({ where: { id: Number(req.params.id) } })
     ]);
     res.json({ message: "Deleted" });
   } catch (e) { res.status(400).json({ message: "Gagal hapus" }); }
@@ -188,18 +166,9 @@ app.get('/logs', authenticateToken, async (req: any, res) => {
   res.json(logs);
 });
 
-// RESET PASSWORD (ADMIN ONLY SECRET)
-app.put('/admin/reset-password', async (req: Request, res: Response) => {
-  const { username, newPassword, adminSecret } = req.body;
-  if (adminSecret !== "VENTO_OWNER_KODE_99") return res.status(403).json({ message: "Ditolak" });
-  try {
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await prisma.user.update({ where: { username }, data: { password: hashedPassword } });
-    res.json({ message: `Password ${username} diganti!` });
-  } catch (e) { res.status(400).json({ message: "User tidak ditemukan" }); }
-});
+// --- JALANKAN SERVER ---
+const serverPort: number = Number(process.env.PORT) || 8000;
 
-const PORT = process.env.PORT || 8000; 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Vento Backend is running on port ${PORT}`);
+app.listen(serverPort, '0.0.0.0', () => {
+  console.log(`Vento Backend running on port ${serverPort}`);
 });
