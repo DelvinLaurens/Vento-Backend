@@ -199,5 +199,7 @@ app.put('/admin/reset-password', async (req: Request, res: Response) => {
   } catch (e) { res.status(400).json({ message: "User tidak ditemukan" }); }
 });
 
-const PORT = process.env.PORT || 5000; // Render akan memberikan PORT otomatis
-app.listen(PORT, '0.0.0.0', () => console.log(`Vento Backend Online di Port ${PORT}`));
+const PORT = process.env.PORT || 8000; 
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Vento Backend is running on port ${PORT}`);
+});
