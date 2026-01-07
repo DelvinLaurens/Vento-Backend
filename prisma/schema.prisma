@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id       Int      @id @default(autoincrement())
+  username String   @unique
+  password String
+  namaToko String
+  role     String   @default("USER") // Tambahkan ini: "ADMIN" atau "USER"
+  items    Item[]
+  logs     ActivityLog[]
+}
+
+model Item {
+  id         Int      @id @default(autoincrement())
+  nama       String
+  barcode    String?  @unique // Gunakan ? agar barang lama yang tidak punya barcode tidak error
+  harga      Int      @default(0) // Gunakan @default agar barang lama otomatis terisi 0
+  stok       Int      @default(0)
+  kategori   String   @default("Umum")
+  satuan     String   @default("Pcs")
+  updatedAt  DateTime @updatedAt
+  
+  user       User     @relation(fields: [userId], references: [id])
+  userId     Int
+  logs       ActivityLog[]
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  aksi      String   // Contoh: "TAMBAH", "EDIT", "HAPUS"
+  rincian   String   
+  createdAt DateTime @default(now())
+  
+  item      Item?    @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  itemId    Int?
+  user      User     @relation(fields: [userId], references: [id])
+  userId     Int
+}
